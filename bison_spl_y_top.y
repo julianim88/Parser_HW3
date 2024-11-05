@@ -266,11 +266,6 @@ empty
     { file_location *floc = file_location_make(lexer_filename(), lexer_line());
 	$$ = ast_empty(floc); }
     ;
-
-
-
-
-
 %%
 
 // Set the program's ast to be ast
