@@ -5,6 +5,9 @@
 #include "ast.h"
 #include "utilities.h"
 #include "unparser.h"
+/*#include "symtab.h"
+#include "scope_check.h" */
+
 
 /* Print a usage message on stderr 
    and exit with failure. */
@@ -32,6 +35,13 @@ int main(int argc, char *argv[])
 
     // unparse to check on the AST
     unparseProgram(stdout, progast);
+
+    //comment out next two commands to disable decCheck
+    // building symbol table
+    symtab_initialize();
+
+    // check for duplicate declarations
+    scope_check_program(progast);
 
     return EXIT_SUCCESS;
 }
