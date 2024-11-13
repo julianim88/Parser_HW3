@@ -1,168 +1,147 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include "parser.h"
-#include "id_attrs.h"
-#include "ast.h"
 #include "symtab.h"
-#include "scope_check.h"
+#include "scope.h"
 #include "utilities.h"
-#include "id_use.h"
 
+//symbol table is a stack of scope
+
+// index of the top of the stack of scopes
+static int symtab_top = -1;
+
+// the symbol table itself
 static scope_t *symtab[MAX_NESTING];
-static int symtab_top_idx = -1;
 
-// Initialize the symbol table
-void symtab_initialize() {
-    symtab_top_idx = -1;
+// initialize the symbol table
+void symtab_initialize()
+{
+    // initialize the internal state
+    symtab_top = -1;
     for (int i = 0; i < MAX_NESTING; i++) {
-        symtab[i] = NULL;
+	symtab[i] = NULL;
     }
 }
 
-// Return the number of scopes in the symbol table
-unsigned int symtab_size() {
-    return symtab_top_idx + 1;
+//returns number of scopes currently in symtab
+unsigned int symtab_size(){
+    return symtab_top + 1;
 }
 
-// Check if the symbol table is empty
-bool symtab_empty() {
-    return symtab_top_idx == -1;
+//returns true if symtab is empty
+bool symtab_empty(){
+    return (symtab_size() == 0);
 }
 
-// Check if the symbol table is full
-bool symtab_full() {
-    return symtab_top_idx >= MAX_NESTING - 1;
+// Return the current scope's next location count (of variables).
+unsigned int symtab_scope_loc_count(){
+    return scope_loc_count(symtab[symtab_top]);
 }
 
-// Start a new scope (for a block or procedure)
-void symtab_enter_scope() {
-    if (symtab_full()) {
-        bail_with_error("Symbol table is full; cannot enter new scope!");
-    }
-    symtab[++symtab_top_idx] = scope_create();
+// Return the current scope's size (the number of declared ids).
+unsigned int symtab_scope_size(){
+    return scope_size(symtab[symtab_top]);
 }
 
-// Exit the current scope, freeing its resources
-void symtab_leave_scope() {
-    if (symtab_empty()) {
-        bail_with_error("No scope to leave; symbol table is empty!");
-    }
-    scope_destroy(symtab[symtab_top_idx--]);
+//checks if the current scope is full
+bool symtab_scope_full(){
+    return scope_full(symtab[symtab_top]);
 }
 
-// Return the count of variable and constant declarations in the current scope
-unsigned int symtab_scope_loc_count() {
-    return scope_loc_count(symtab[symtab_top_idx]);
+// Return the current nesting level of the symbol table.
+// The first enterscope will have this return 0 as its nesting level.
+unsigned int symtab_current_nesting_level(){
+    // assert(symtab_top_idx >= 0);
+    return symtab_top;
 }
 
-// Return the size of the current scope
-unsigned int symtab_scope_size() {
-    return scope_size(symtab[symtab_top_idx]);
+//checks if the symboltable is full
+bool symtab_full(){
+    return symtab_current_nesting_level() == MAX_NESTING - 1;
 }
 
-// Check if the current scope is full
-bool symtab_scope_full() {
-    return scope_full(symtab[symtab_top_idx]);
-}
-
-// Return the current nesting level
-unsigned int symtab_current_nesting_level() {
-    return symtab_top_idx;
-}
-
-// Check if an identifier is declared in any scope (backwards through stack)
-bool symtab_declared(const char *name) {
+//checks if a name was declared in any scope in the symbol table
+bool symtab_declared(const char *name){
     return symtab_lookup(name) != NULL;
 }
 
-// Check if an identifier is declared in the current scope only
-bool symtab_declared_in_current_scope(const char *name) {
-    return scope_declared(symtab[symtab_top_idx], name);
+//checks if a name was declared in the current scope
+bool symtab_declared_in_current_scope(const char *name){
+    id_attrs *attrs = scope_lookup(symtab[symtab_top], name);
+    return attrs != NULL;
 }
 
-// Insert an identifier with attributes into the current scope
-void symtab_insert(const char *name, id_attrs *attrs) {
-    scope_insert(symtab[symtab_top_idx], name, attrs);
+// Put the given name, which is to be declared with kind k,
+// and has its declaration at the given file location (floc),
+// into the current scope's symbol table at the offset scope_next_offset().
+static void add_ident(scope_t *s, const char *name, id_attrs *attrs)
+{
+    id_attrs *old_attrs = scope_lookup(s, name);
+    if (old_attrs != NULL) {
+        bail_with_prog_error(attrs->file_loc,
+		      "symtab_insert called with an already declared variable\"%s\"!",
+		      name);
+    } else {
+	scope_insert(s, name, attrs);
+    }
 }
 
-// Lookup an identifier in all scopes, returning an id_use pointer if found
-id_use *symtab_lookup(const char *name) {
-    for (int level = symtab_top_idx; level >= 0; level--) {
+// Requires: !symtab_declared_in_current_scope(name) && attrs != NULL.
+// If !symtab_declared_in_current_scope(name), then modify the current scope
+// to add an association from the given name to attrs.
+void symtab_insert(const char *name, id_attrs *attrs){
+    add_ident(symtab[symtab_top], name, attrs);
+}
+
+// Requires: !symtab_full()
+// Start a new scope (for a procedure)
+void symtab_enter_scope()
+{
+    symtab_top++;
+    symtab[symtab_top] = scope_create();
+}
+
+// Requires: !symtab_empty()
+void symtab_leave_scope()
+{
+    if (symtab_top < 0) {
+	bail_with_error("Cannot leave scope, no scope on symtab's stack!");
+    }
+    symtab_top--;
+}
+
+// Return (a pointer to) the attributes of the given name 
+// or NULL if there is no association for name in the symbol table.
+// (this looks back through all scopes).
+id_use *symtab_lookup(const char *name)
+{
+    unsigned int levelsOut = 0;
+    for (int level = symtab_top; 0 <= level; level--) {
         id_attrs *attrs = scope_lookup(symtab[level], name);
         if (attrs != NULL) {
-            return id_use_create(attrs, symtab_top_idx - level);
+            return id_use_create(attrs, levelsOut);
         }
+        levelsOut++;
     }
     return NULL;
 }
-Updated scope_check.c
-This file traverses the AST and checks for undeclared or duplicate identifiers, creating the symbol table as it processes variable declarations.
 
-c
-Copy code
-#include "scope_check.h"
-#include "symtab.h"
-#include "error.h"
-
-void scope_check_program(program_t prog) {
-    symtab_enter_scope();
-    scope_check_varDecls(prog.var_decls);
-    prog.stmts = scope_check_stmts(prog.stmts);
-    symtab_leave_scope();
-}
-
-void scope_check_varDecls(var_decls_t vds) {
-    var_decl_t *vdp = vds.var_decls;
-    while (vdp != NULL) {
-        scope_check_varDecl(*vdp);
-        vdp = vdp->next;
+// We'll use lexical addresses in HW4...
+// Requires: symtab_declared(name)
+// Return (a pointer to) the lexical address of the given name
+// or NULL if there is no association for name.
+/*
+lexical_address *symtab_lexical_address(const char *name)
+{
+    // maintaining: -1 <= level <= symtab_top_idx;
+    // maintaining: (for all int j:
+    //                level < j <= symtab_top_idx
+    //                   ==> !scope_declared(symtab[j], name))
+    for (int level = symtab_top_idx; 0 <= level; level--) {
+	id_attrs *attrs = scope_lookup(symtab[level], name);
+	if (attrs != NULL) {
+	    return lexical_address_create(symtab_top_idx - level,
+					  attrs->loc_offset);
+	}
     }
+    bail_with_error("Couldn't find %s for symtab_lexical_address!", name);
+    return NULL;
 }
-
-void scope_check_varDecl(var_decl_t vd) {
-    scope_check_idents(vd.idents, vd.type);
-}
-
-void scope_check_idents(idents_t ids, type_exp_e t) {
-    ident_t *idp = ids.idents;
-    while (idp != NULL) {
-        scope_check_declare_ident(*idp, t);
-        idp = idp->next;
-    }
-}
-
-void scope_check_declare_ident(ident_t id, type_exp_e t) {
-    if (symtab_declared_in_current_scope(id.name)) {
-        bail_with_prog_error(*(id.file_loc), "Variable \"%s\" has already been declared!", id.name);
-    } else {
-        int loc_count = symtab_scope_loc_count();
-        id_attrs *attrs = id_attrs_loc_create(*(id.file_loc), t, loc_count);
-        symtab_insert(id.name, attrs);
-    }
-}
-
-stmt_t scope_check_stmt(stmt_t stmt) {
-    switch (stmt.stmt_kind) {
-        case assign_stmt:
-            stmt.data.assign_stmt = scope_check_assignStmt(stmt.data.assign_stmt);
-            break;
-        // Other statement types
-        default:
-            bail_with_error("Invalid statement in scope_check_stmt!");
-    }
-    return stmt;
-}
-
-assign_stmt_t scope_check_assignStmt(assign_stmt_t stmt) {
-    stmt.idu = scope_check_ident_declared(*(stmt.file_loc), stmt.name);
-    *stmt.expr = scope_check_expr(*(stmt.expr));
-    return stmt;
-}
-
-id_use *scope_check_ident_declared(file_location floc, const char *name) {
-    id_use *use = symtab_lookup(name);
-    if (!use) {
-        bail_with_prog_error(floc, "Identifier \"%s\" is not declared!", name);
-    }
-    return use;
-}
+*/
