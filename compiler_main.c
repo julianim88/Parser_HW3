@@ -3,11 +3,10 @@
 #include "parser.h"
 #include "lexer.h"
 #include "ast.h"
+#include "symtab.h"
+#include "scope_check.h"
 #include "utilities.h"
 #include "unparser.h"
-/*#include "symtab.h"
-#include "scope_check.h" */
-
 
 /* Print a usage message on stderr 
    and exit with failure. */
@@ -36,7 +35,8 @@ int main(int argc, char *argv[])
     // unparse to check on the AST
     unparseProgram(stdout, progast);
 
-    //comment out next two commands to disable decCheck
+    // comment out the next two commands to disable DC
+
     // building symbol table
     symtab_initialize();
 
