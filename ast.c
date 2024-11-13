@@ -650,7 +650,7 @@ expr_t ast_expr_signed_expr(token_t sign, expr_t e)
 	// don't make any changes, use e as the result
 	return e;
 	break;
-    default:
+    default: 
 	bail_with_error("Unexpected sign token in ast_expr_signed_expr: %d",
 			sign.code);
 	break;
